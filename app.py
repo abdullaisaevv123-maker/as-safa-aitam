@@ -4,7 +4,10 @@ import os
 import sqlite3
 from pathlib import Path
 from datetime import datetime
-import cv2
+try:
+    import cv2
+except Exception:
+    cv2 = None
 import fitz
 import numpy as np
 import qrcode
@@ -73,30 +76,27 @@ def init_db():
 init_db()
 
 # ============================================================
-# АРИП ЖАНА АРАБЧА ФОРМАТТОО (ARABTYPE / САКАЛ-МАЖЖАЛ)
+# АРИП ЖАНА TIMES NEW ROMAN
 # ============================================================
 def _find_font_path():
+    noto = BASE / "NotoNaskhArabic-Regular.ttf"
+    if noto.exists():
+        return str(noto)
+
     windir = os.environ.get("WINDIR", r"C:\Windows")
     fonts_dir = os.path.join(windir, "Fonts")
-
     candidates = [
-        BASE / "arabtype.ttf",
-        BASE / "ArabType.ttf",
-        BASE / "amiri-regular.ttf",
-        BASE / "Amiri-Regular.ttf",
-        BASE / "NotoNaskhArabic-Regular.ttf",
-        BASE / "times.ttf",
-        Path(fonts_dir) / "arabtype.ttf",
-        Path(fonts_dir) / "trado.ttf",
-        Path(fonts_dir) / "times.ttf",
-        Path(fonts_dir) / "timesbd.ttf",
-        Path(fonts_dir) / "arial.ttf",
-        Path("/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf"),
+        os.path.join(fonts_dir, "times.ttf"),
+        os.path.join(fonts_dir, "timesbd.ttf"),
+        os.path.join(fonts_dir, "Times New Roman.ttf"),
+        os.path.join(fonts_dir, "timesnewroman.ttf"),
+        os.path.join(fonts_dir, "arial.ttf"),
+        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
     for path in candidates:
-        p = Path(path)
-        if p.exists() and p.is_file():
-            return str(p.resolve())
+        if os.path.exists(path):
+            return path
     return None
 
 def _value_font(size_px):
@@ -114,33 +114,18 @@ def _has_arabic(text):
         for ch in str(text)
     )
 
-def _reshape_arabic_only(text):
-    """Арабча тамгаларды жана харакаттарды (сакал-мажжал) бириктирет, багытын өзгөртпөйт."""
-    s = str(text or "")
-    if not s:
+def _format_text(text):
+    text = str(text or "")
+    if not text:
         return ""
-    if _has_arabic(s):
-        try:
-            import arabic_reshaper
-            return arabic_reshaper.reshape(s)
-        except Exception:
-            return s
-    return s
-
-def _format_display_text(text):
-    """Арабча тамгаларды бириктирип, визуалдык багытын (RTL) тууралайт."""
-    s = str(text or "")
-    if not s:
-        return ""
-    if _has_arabic(s):
+    if _has_arabic(text):
         try:
             import arabic_reshaper
             from bidi.algorithm import get_display
-            reshaped = arabic_reshaper.reshape(s)
-            return get_display(reshaped)
+            return get_display(arabic_reshaper.reshape(text))
         except Exception:
-            return s
-    return s
+            return text
+    return text
 
 # ============================================================
 # PDF FIELD NAMES
@@ -173,76 +158,69 @@ IMAGES = {
 }
 
 # ============================================================
-# САПТАРГА БӨЛҮҮ ЖАНА ЖАЗУУ
+# ТЕКСТТИ PDF ТАЛААСЫНА ТАЗА ТЕКСТ (ВЕКТОРДУК) КАТАРЫ КОЮУ
 # ============================================================
-def _wrap_logical_lines(text, max_width_pt, size_pt, font_obj=None):
-    wrapped = []
-    for raw_line in str(text or "").splitlines():
-        clean = raw_line.strip()
-        if not clean:
-            continue
-        words = clean.split()
-        current = ""
-        for word in words:
-            candidate = word if not current else f"{current} {word}"
-            measured_str = _format_display_text(candidate)
-            if font_obj is not None:
-                try:
-                    w_pt = font_obj.text_length(measured_str, fontsize=size_pt)
-                except Exception:
-                    w_pt = len(candidate) * size_pt * 0.55
-            else:
-                w_pt = len(candidate) * size_pt * 0.55
-
-            if w_pt <= max_width_pt or not current:
-                current = candidate
-            else:
-                wrapped.append(current)
-                current = word
-        if current:
-            wrapped.append(current)
-    return wrapped or [str(text).strip()]
-
 def _render_value(text, width_pt, height_pt, size_pt=18, align="right", top_align=False):
     if text is None:
         return None
-    raw = str(text).strip()
-    if not raw:
+    text = str(text).strip()
+    if not text:
         return None
 
     scale = 4
-    W = max(60, int(width_pt * scale))
-    H = max(40, int(height_pt * scale))
+    W = max(40, int(width_pt * scale))
+    H = max(30, int(height_pt * scale))
     canvas = Image.new("RGBA", (W, H), (255, 255, 255, 0))
     draw = ImageDraw.Draw(canvas)
 
-    font = _value_font(max(12, int(size_pt * scale)))
-    padding_x = 10 * scale
-    max_width = max(20, W - (padding_x * 2))
+    font = _value_font(max(10, int(size_pt * scale)))
+    padding_x = 12 * scale
+    max_width = W - (padding_x * 2)
 
-    lines = _wrap_logical_lines(raw, max_width / scale, size_pt)
-    display_lines = [_format_display_text(ln) for ln in lines]
+    words = text.split()
+    lines = []
+    if len(words) <= 1:
+        lines = [text]
+    else:
+        current = ""
+        for word in words:
+            candidate = word if not current else current + " " + word
+            try:
+                box = draw.textbbox((0, 0), _format_text(candidate), font=font)
+                line_width = box[2] - box[0]
+            except Exception:
+                line_width = len(candidate) * size_pt
+            if line_width <= max_width or not current:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
 
+    sample = _format_text("ابتAg0123456789")
     try:
-        bbox = draw.textbbox((0, 0), _format_display_text("بِسْمِ اللَّهِ"), font=font)
-        line_h = max(int(size_pt * scale * 1.15), bbox[3] - bbox[1] + int(6 * scale))
+        bbox = draw.textbbox((0, 0), sample, font=font)
+        line_h = max(1, bbox[3] - bbox[1])
     except Exception:
-        line_h = int(size_pt * scale * 1.3)
+        line_h = int(size_pt * scale)
+    bbox = (0, 0, 0, line_h)
 
-    spacing = max(int(4 * scale), int(size_pt * 0.22 * scale))
-    total_h = len(display_lines) * line_h + max(0, len(display_lines) - 1) * spacing
+    spacing = max(2, int(size_pt * 0.20 * scale))
+    total_h = len(lines) * line_h + max(0, len(lines) - 1) * spacing
 
     if top_align:
-        y = 4 * scale
+        y = 5 * scale
     else:
-        y = max(2 * scale, int((H - total_h) / 2))
+        y = max(0, int((H - total_h) / 2 - bbox[1]))
 
-    for d_line in display_lines:
+    for line in lines:
+        processed_line = _format_text(line)
         try:
-            line_box = draw.textbbox((0, 0), d_line, font=font)
+            line_box = draw.textbbox((0, 0), processed_line, font=font)
             line_w = line_box[2] - line_box[0]
         except Exception:
-            line_w = len(d_line) * (size_pt * scale * 0.55)
+            line_w = len(processed_line) * (size_pt * scale * 0.5)
 
         if align == "right":
             x = W - padding_x - line_w
@@ -251,12 +229,38 @@ def _render_value(text, width_pt, height_pt, size_pt=18, align="right", top_alig
         else:
             x = int((W - line_w) / 2)
 
-        draw.text((x, y), d_line, font=font, fill=(20, 20, 20, 255))
+        draw.text((x, y), processed_line, font=font, fill=(20, 20, 20, 255))
         y += line_h + spacing
 
     out = io.BytesIO()
     canvas.save(out, "PNG")
     return out.getvalue()
+
+def _wrap_logical_lines(text, max_width_pt, size_pt, font_obj=None):
+    wrapped = []
+    for raw_line in str(text or "").splitlines():
+        words = raw_line.split()
+        if len(words) <= 1:
+            wrapped.append(raw_line.strip())
+            continue
+        current = ""
+        for word in words:
+            candidate = word if not current else current + " " + word
+            if font_obj is not None:
+                try:
+                    w_pt = font_obj.text_length(_format_text(candidate), fontsize=size_pt)
+                except Exception:
+                    w_pt = len(candidate) * size_pt * 0.52
+            else:
+                w_pt = len(candidate) * size_pt * 0.52
+            if w_pt <= max_width_pt or not current:
+                current = candidate
+            else:
+                wrapped.append(current)
+                current = word
+        if current:
+            wrapped.append(current)
+    return [ln for ln in wrapped if ln != ""] or [str(text).strip()]
 
 def _insert_vector_text(page, rect, value, size=18, align="right", top_align=False):
     text = str(value or "").strip()
@@ -264,19 +268,24 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
         return True
 
     font_path = _find_font_path()
-    if not font_path:
-        return False
 
+    # Түз PDF текст операторлору (insert_textbox) — PDF редакторлордо түз өчүрүп оңдоого болот
     try:
-        fontname = "arabtype_font"
-        page.insert_font(fontname=fontname, fontfile=font_path)
-        font_obj = fitz.Font(fontfile=font_path)
+        fontname = "helv"
+        font_obj = None
+        if font_path:
+            fontname = "takrir_ar"
+            try:
+                page.insert_font(fontname=fontname, fontfile=font_path)
+                font_obj = fitz.Font(fontfile=font_path)
+            except Exception:
+                fontname = "helv"
+                font_obj = None
 
-        pad_x = 8.0
-        max_w = max(24.0, rect.width - pad_x * 2)
+        pad_x = 10.0
+        max_w = max(20.0, rect.width - pad_x * 2)
         logical_lines = _wrap_logical_lines(text, max_w, size, font_obj=font_obj)
-        shaped_lines = [_format_display_text(ln) for ln in logical_lines]
-        shaped_block = "\n".join(shaped_lines)
+        shaped = "\n".join(_format_text(ln) for ln in logical_lines)
 
         align_map = {
             "right": getattr(fitz, "TEXT_ALIGN_RIGHT", 2),
@@ -285,17 +294,17 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
         }
         align_code = align_map.get(align, 2)
 
-        line_h = size * 1.35
+        line_h = size * 1.25
         if top_align:
-            box_rect = fitz.Rect(rect.x0 + pad_x, rect.y0 + 3.0, rect.x1 - pad_x, rect.y1 - 2.0)
+            box_rect = fitz.Rect(rect.x0 + pad_x, rect.y0 + 4.0, rect.x1 - pad_x, rect.y1)
         else:
-            est_h = line_h * max(1, len(shaped_lines))
+            est_h = line_h * max(1, len(logical_lines))
             top_pad = max(1.0, (rect.height - est_h) / 2.0)
-            box_rect = fitz.Rect(rect.x0 + pad_x, rect.y0 + top_pad, rect.x1 - pad_x, rect.y1 - 2.0)
+            box_rect = fitz.Rect(rect.x0 + pad_x, rect.y0 + top_pad, rect.x1 - pad_x, rect.y1)
 
         rc = page.insert_textbox(
             box_rect,
-            shaped_block,
+            shaped,
             fontsize=size,
             fontname=fontname,
             color=(20 / 255, 20 / 255, 20 / 255),
@@ -306,6 +315,43 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
             return True
     except Exception:
         pass
+
+    # Резервдик ыкма: insert_htmlbox (эгер insert_textbox батпай калса)
+    if hasattr(page, "insert_htmlbox"):
+        try:
+            font_css = ""
+            font_family = "sans-serif"
+            if font_path:
+                font_uri = Path(font_path).resolve().as_uri()
+                font_family = "'TakrirFont', sans-serif"
+                font_css = f"""
+                @font-face {{
+                    font-family: 'TakrirFont';
+                    src: url('{font_uri}');
+                }}
+                """
+            direction = "rtl" if _has_arabic(text) else "ltr"
+            escaped_html = html.escape(text).replace("\n", "<br>")
+            line_count = max(1, len(text.splitlines()))
+            top_pad = 4.0 if top_align else max(1.0, (rect.height - size * 1.25 * line_count) / 2.0)
+            css = f"""
+            {font_css}
+            body {{
+                margin: 0;
+                padding: {top_pad:.1f}pt 10pt 0 10pt;
+                font-family: {font_family};
+                font-size: {size}pt;
+                line-height: 1.25;
+                color: #141414;
+            }}
+            """
+            inner = f"<div style='direction:{direction}; text-align:{align};'>{escaped_html}</div>"
+            res = page.insert_htmlbox(rect, inner, css=css, overlay=True)
+            spare = res[0] if isinstance(res, tuple) else res
+            if spare is not None:
+                return True
+        except Exception:
+            pass
 
     return False
 
@@ -345,21 +391,25 @@ def put_automatic_fields(doc):
 # ============================================================
 # FACE DETECTOR
 # ============================================================
-cascade_path = (cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-if not os.path.exists(cascade_path):
-    cascade_path = os.path.join(
-        os.path.dirname(cv2.__file__), "data", "haarcascade_frontalface_default.xml"
-    )
-FACE_CASCADE = cv2.CascadeClassifier(cascade_path)
+FACE_CASCADE = None
+if cv2 is not None:
+    try:
+        cascade_path = (cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        if not os.path.exists(cascade_path):
+            cascade_path = os.path.join(
+                os.path.dirname(cv2.__file__), "data", "haarcascade_frontalface_default.xml"
+            )
+        FACE_CASCADE = cv2.CascadeClassifier(cascade_path)
+    except Exception:
+        FACE_CASCADE = None
 
 def prepare_photo10(data):
     try:
         original = Image.open(io.BytesIO(data)).convert("RGB")
-        cv_image = cv2.cvtColor(np.array(original), cv2.COLOR_RGB2BGR)
-        gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
-
         faces = ()
-        if not FACE_CASCADE.empty():
+        if cv2 is not None and FACE_CASCADE is not None and not FACE_CASCADE.empty():
+            cv_image = cv2.cvtColor(np.array(original), cv2.COLOR_RGB2BGR)
+            gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
             faces = FACE_CASCADE.detectMultiScale(
                 gray, scaleFactor=1.08, minNeighbors=5, minSize=(60, 60)
             )
@@ -766,4 +816,6 @@ def download(filename):
     return send_from_directory(GENERATED, filename, as_attachment=True)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    debug_mode = os.environ.get("FLASK_DEBUG", "0") == "1"
+    app.run(host="0.0.0.0", port=port, debug=debug_mode)
