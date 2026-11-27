@@ -4,10 +4,7 @@ import os
 import sqlite3
 from pathlib import Path
 from datetime import datetime
-try:
-    import cv2
-except Exception:
-    cv2 = None
+import cv2
 import fitz
 import numpy as np
 import qrcode
@@ -76,16 +73,24 @@ def init_db():
 init_db()
 
 # ============================================================
-# АРИП ЖАНА TIMES NEW ROMAN
+# АРИП ЖАНА SAKKAL MAJALLA / TIMES NEW ROMAN
 # ============================================================
 def _find_font_path():
-    noto = BASE / "NotoNaskhArabic-Regular.ttf"
-    if noto.exists():
-        return str(noto)
+    local_candidates = [
+        BASE / "Sakkal Majalla Regular.ttf",
+        BASE / "fonts" / "Sakkal Majalla Regular.ttf",
+        BASE / "majalla.ttf",
+        BASE / "NotoNaskhArabic-Regular.ttf",
+        BASE / "fonts" / "NotoNaskhArabic-Regular.ttf",
+    ]
+    for path in local_candidates:
+        if path.exists():
+            return str(path)
 
     windir = os.environ.get("WINDIR", r"C:\Windows")
     fonts_dir = os.path.join(windir, "Fonts")
     candidates = [
+        os.path.join(fonts_dir, "majalla.ttf"),
         os.path.join(fonts_dir, "times.ttf"),
         os.path.join(fonts_dir, "timesbd.ttf"),
         os.path.join(fonts_dir, "Times New Roman.ttf"),
@@ -391,25 +396,21 @@ def put_automatic_fields(doc):
 # ============================================================
 # FACE DETECTOR
 # ============================================================
-FACE_CASCADE = None
-if cv2 is not None:
-    try:
-        cascade_path = (cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        if not os.path.exists(cascade_path):
-            cascade_path = os.path.join(
-                os.path.dirname(cv2.__file__), "data", "haarcascade_frontalface_default.xml"
-            )
-        FACE_CASCADE = cv2.CascadeClassifier(cascade_path)
-    except Exception:
-        FACE_CASCADE = None
+cascade_path = (cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+if not os.path.exists(cascade_path):
+    cascade_path = os.path.join(
+        os.path.dirname(cv2.__file__), "data", "haarcascade_frontalface_default.xml"
+    )
+FACE_CASCADE = cv2.CascadeClassifier(cascade_path)
 
 def prepare_photo10(data):
     try:
         original = Image.open(io.BytesIO(data)).convert("RGB")
+        cv_image = cv2.cvtColor(np.array(original), cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+
         faces = ()
-        if cv2 is not None and FACE_CASCADE is not None and not FACE_CASCADE.empty():
-            cv_image = cv2.cvtColor(np.array(original), cv2.COLOR_RGB2BGR)
-            gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+        if not FACE_CASCADE.empty():
             faces = FACE_CASCADE.detectMultiScale(
                 gray, scaleFactor=1.08, minNeighbors=5, minSize=(60, 60)
             )
@@ -816,6 +817,4 @@ def download(filename):
     return send_from_directory(GENERATED, filename, as_attachment=True)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    debug_mode = os.environ.get("FLASK_DEBUG", "0") == "1"
-    app.run(host="0.0.0.0", port=port, debug=debug_mode)
+    app.run(host="0.0.0.0", port=5000, debug=True)
