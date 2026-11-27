@@ -298,12 +298,40 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
 
         for try_size in range(int(size), 10, -1):
             logical_lines = _wrap_logical_lines(text, max_w, try_size, font_obj=font_obj)
-            shaped = "\n".join(_format_text(ln) for ln in logical_lines)
 
-            line_h = try_size * 1.25
             if top_align:
-                box_rect = fitz.Rect(rect.x0 + pad_x, rect.y0 + 4.0, rect.x1 - pad_x, rect.y1)
+                line_step = try_size * 1.05
+                top_start = rect.y0 + 6.0
+                needed_h = 6.0 + max(0, len(logical_lines) - 1) * line_step + try_size * 1.35
+                if needed_h > rect.height and try_size > 11:
+                    continue
+
+                all_ok = True
+                for idx, ln in enumerate(logical_lines):
+                    y_i = top_start + idx * line_step
+                    line_rect = fitz.Rect(
+                        rect.x0 + pad_x,
+                        y_i,
+                        rect.x1 - pad_x,
+                        y_i + try_size * 1.6,
+                    )
+                    rc = page.insert_textbox(
+                        line_rect,
+                        _format_text(ln),
+                        fontsize=try_size,
+                        fontname=fontname,
+                        color=(20 / 255, 20 / 255, 20 / 255),
+                        align=align_code,
+                        overlay=True,
+                    )
+                    if rc < 0:
+                        all_ok = False
+                        break
+                if all_ok:
+                    return True
             else:
+                shaped = "\n".join(_format_text(ln) for ln in logical_lines)
+                line_h = try_size * 1.25
                 est_h = line_h * max(1, len(logical_lines))
                 top_pad = (rect.height - est_h) / 2.0
                 box_rect = fitz.Rect(
@@ -313,17 +341,17 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
                     rect.y1 + 12.0,
                 )
 
-            rc = page.insert_textbox(
-                box_rect,
-                shaped,
-                fontsize=try_size,
-                fontname=fontname,
-                color=(20 / 255, 20 / 255, 20 / 255),
-                align=align_code,
-                overlay=True,
-            )
-            if rc >= 0:
-                return True
+                rc = page.insert_textbox(
+                    box_rect,
+                    shaped,
+                    fontsize=try_size,
+                    fontname=fontname,
+                    color=(20 / 255, 20 / 255, 20 / 255),
+                    align=align_code,
+                    overlay=True,
+                )
+                if rc >= 0:
+                    return True
     except Exception:
         pass
 
