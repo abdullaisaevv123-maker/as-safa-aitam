@@ -274,7 +274,7 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
 
     font_path = _find_font_path()
 
-    # Түз PDF текст операторлору (insert_textbox) — PDF редакторлордо түз өчүрүп оңдоого болот
+    # Түз PDF текст операторлору (insert_textbox) — баардык талааларда бирдей шрифт колдонулат
     try:
         fontname = "helv"
         font_obj = None
@@ -289,9 +289,6 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
 
         pad_x = 10.0
         max_w = max(20.0, rect.width - pad_x * 2)
-        logical_lines = _wrap_logical_lines(text, max_w, size, font_obj=font_obj)
-        shaped = "\n".join(_format_text(ln) for ln in logical_lines)
-
         align_map = {
             "right": getattr(fitz, "TEXT_ALIGN_RIGHT", 2),
             "left": getattr(fitz, "TEXT_ALIGN_LEFT", 0),
@@ -299,64 +296,31 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
         }
         align_code = align_map.get(align, 2)
 
-        line_h = size * 1.25
-        if top_align:
-            box_rect = fitz.Rect(rect.x0 + pad_x, rect.y0 + 4.0, rect.x1 - pad_x, rect.y1)
-        else:
-            est_h = line_h * max(1, len(logical_lines))
-            top_pad = max(1.0, (rect.height - est_h) / 2.0)
-            box_rect = fitz.Rect(rect.x0 + pad_x, rect.y0 + top_pad, rect.x1 - pad_x, rect.y1)
+        for try_size in range(int(size), 10, -1):
+            logical_lines = _wrap_logical_lines(text, max_w, try_size, font_obj=font_obj)
+            shaped = "\n".join(_format_text(ln) for ln in logical_lines)
 
-        rc = page.insert_textbox(
-            box_rect,
-            shaped,
-            fontsize=size,
-            fontname=fontname,
-            color=(20 / 255, 20 / 255, 20 / 255),
-            align=align_code,
-            overlay=True,
-        )
-        if rc >= 0:
-            return True
+            line_h = try_size * 1.25
+            if top_align:
+                box_rect = fitz.Rect(rect.x0 + pad_x, rect.y0 + 4.0, rect.x1 - pad_x, rect.y1)
+            else:
+                est_h = line_h * max(1, len(logical_lines))
+                top_pad = max(1.0, (rect.height - est_h) / 2.0)
+                box_rect = fitz.Rect(rect.x0 + pad_x, rect.y0 + top_pad, rect.x1 - pad_x, rect.y1)
+
+            rc = page.insert_textbox(
+                box_rect,
+                shaped,
+                fontsize=try_size,
+                fontname=fontname,
+                color=(20 / 255, 20 / 255, 20 / 255),
+                align=align_code,
+                overlay=True,
+            )
+            if rc >= 0:
+                return True
     except Exception:
         pass
-
-    # Резервдик ыкма: insert_htmlbox (эгер insert_textbox батпай калса)
-    if hasattr(page, "insert_htmlbox"):
-        try:
-            font_css = ""
-            font_family = "sans-serif"
-            if font_path:
-                font_uri = Path(font_path).resolve().as_uri()
-                font_family = "'TakrirFont', sans-serif"
-                font_css = f"""
-                @font-face {{
-                    font-family: 'TakrirFont';
-                    src: url('{font_uri}');
-                }}
-                """
-            direction = "rtl" if _has_arabic(text) else "ltr"
-            escaped_html = html.escape(text).replace("\n", "<br>")
-            line_count = max(1, len(text.splitlines()))
-            top_pad = 4.0 if top_align else max(1.0, (rect.height - size * 1.25 * line_count) / 2.0)
-            css = f"""
-            {font_css}
-            body {{
-                margin: 0;
-                padding: {top_pad:.1f}pt 10pt 0 10pt;
-                font-family: {font_family};
-                font-size: {size}pt;
-                line-height: 1.25;
-                color: #141414;
-            }}
-            """
-            inner = f"<div style='direction:{direction}; text-align:{align};'>{escaped_html}</div>"
-            res = page.insert_htmlbox(rect, inner, css=css, overlay=True)
-            spare = res[0] if isinstance(res, tuple) else res
-            if spare is not None:
-                return True
-        except Exception:
-            pass
 
     return False
 
@@ -551,10 +515,6 @@ def build(form, files):
         value = (form_dict.get(k) or "").strip()
         top_align = k in ("impact", "notes")
         size = 18
-        if k in ("impact", "notes"):
-            size = 15
-        elif k == "future_wish":
-            size = 17
 
         if p < len(doc):
             put_text(doc[p], f, value, size=size, align="right", top_align=top_align)
