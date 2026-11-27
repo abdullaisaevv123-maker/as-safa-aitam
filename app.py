@@ -370,21 +370,36 @@ FACE_CASCADE = cv2.CascadeClassifier(cascade_path)
 def prepare_photo10(data):
     try:
         original = Image.open(io.BytesIO(data)).convert("RGB")
-        cv_image = cv2.cvtColor(np.array(original), cv2.COLOR_RGB2BGR)
+        W, H = original.size
+        target_ratio = 4 / 6
+
+        # Render серверинде тез иштеши үчүн бетти кичирейтилген көчүрмөдөн издейбиз
+        detect_scale = min(1.0, 1000.0 / max(W, H))
+        if detect_scale < 1.0:
+            small = original.resize(
+                (max(1, int(W * detect_scale)), max(1, int(H * detect_scale))),
+                Image.Resampling.BILINEAR,
+            )
+        else:
+            small = original
+
+        cv_image = cv2.cvtColor(np.array(small), cv2.COLOR_RGB2BGR)
         gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
 
         faces = ()
         if not FACE_CASCADE.empty():
             faces = FACE_CASCADE.detectMultiScale(
-                gray, scaleFactor=1.08, minNeighbors=5, minSize=(60, 60)
+                gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40)
             )
-
-        W, H = original.size
-        target_ratio = 4 / 6
 
         if len(faces) > 0:
             faces_sorted = sorted(faces, key=lambda item: item[2] * item[3], reverse=True)
-            x, y, fw, fh = faces_sorted[0]
+            sx, sy, sfw, sfh = faces_sorted[0]
+            x = sx / detect_scale
+            y = sy / detect_scale
+            fw = sfw / detect_scale
+            fh = sfh / detect_scale
+
             face_cx = x + fw / 2
             face_cy = y + fh / 2
 
