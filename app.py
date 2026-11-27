@@ -305,8 +305,13 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
                 box_rect = fitz.Rect(rect.x0 + pad_x, rect.y0 + 4.0, rect.x1 - pad_x, rect.y1)
             else:
                 est_h = line_h * max(1, len(logical_lines))
-                top_pad = max(1.0, (rect.height - est_h) / 2.0)
-                box_rect = fitz.Rect(rect.x0 + pad_x, rect.y0 + top_pad, rect.x1 - pad_x, rect.y1)
+                top_pad = (rect.height - est_h) / 2.0
+                box_rect = fitz.Rect(
+                    rect.x0 + pad_x,
+                    rect.y0 + top_pad - 2.0,
+                    rect.x1 - pad_x,
+                    rect.y1 + 12.0,
+                )
 
             rc = page.insert_textbox(
                 box_rect,
@@ -352,8 +357,8 @@ def put_text(page, field, value, size=18, align="right", top_align=False):
 
 def put_automatic_fields(doc):
     try:
-        put_text(doc[0], "Dropdown2", COUNTRY_VALUE, size=26, align="right")
-        put_text(doc[0], YEAR_FIELD, YEAR_VALUE, size=26, align="right")
+        put_text(doc[0], "Dropdown2", COUNTRY_VALUE, size=22, align="right")
+        put_text(doc[0], YEAR_FIELD, YEAR_VALUE, size=22, align="right")
     except Exception:
         pass
 
@@ -529,7 +534,7 @@ def build(form, files):
     for k, (p, f) in TEXT.items():
         value = (form_dict.get(k) or "").strip()
         top_align = k in ("impact", "notes")
-        size = 22 if k in ("impact", "notes") else 26
+        size = 22
 
         if p < len(doc):
             put_text(doc[p], f, value, size=size, align="right", top_align=top_align)
