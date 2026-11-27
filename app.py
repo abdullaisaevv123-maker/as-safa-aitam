@@ -288,7 +288,7 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
                 font_obj = None
 
         pad_x = 10.0
-        max_w = max(20.0, rect.width - pad_x * 2)
+        max_w = max(20.0, rect.width - pad_x * 2 - 4.0)
         align_map = {
             "right": getattr(fitz, "TEXT_ALIGN_RIGHT", 2),
             "left": getattr(fitz, "TEXT_ALIGN_LEFT", 0),
@@ -300,9 +300,9 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
             logical_lines = _wrap_logical_lines(text, max_w, try_size, font_obj=font_obj)
 
             if top_align:
-                line_step = try_size * 1.05
+                line_step = try_size * 1.08
                 top_start = rect.y0 + 6.0
-                needed_h = 6.0 + max(0, len(logical_lines) - 1) * line_step + try_size * 1.35
+                needed_h = 6.0 + max(0, len(logical_lines) - 1) * line_step + try_size * 1.4
                 if needed_h > rect.height and try_size > 11:
                     continue
 
@@ -313,7 +313,7 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
                         rect.x0 + pad_x,
                         y_i,
                         rect.x1 - pad_x,
-                        y_i + try_size * 1.6,
+                        y_i + try_size * 2.5,
                     )
                     rc = page.insert_textbox(
                         line_rect,
