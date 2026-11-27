@@ -357,6 +357,60 @@ def _insert_vector_text(page, rect, value, size=18, align="right", top_align=Fal
 
     return False
 
+
+def _insert_compact_paragraph(page, rect, value, size=19, align="right"):
+    """Арабча узун тексттерди тыгыз, бирдей аралыктагы саптарга жайгаштырат."""
+    text = str(value or "").strip()
+    if not text:
+        return True
+
+    font_path = _find_font_path()
+    fontname = "helv"
+    font_obj = None
+
+    if font_path:
+        try:
+            fontname = "takrir_ar"
+            page.insert_font(fontname=fontname, fontfile=font_path)
+            font_obj = fitz.Font(fontfile=font_path)
+        except Exception:
+            fontname = "helv"
+            font_obj = None
+
+    pad_x = 12.0
+    pad_y = 7.0
+    max_w = max(20.0, rect.width - pad_x * 2)
+    box_rect = fitz.Rect(
+        rect.x0 + pad_x,
+        rect.y0 + pad_y,
+        rect.x1 - pad_x,
+        rect.y1 - pad_y
+    )
+    align_code = getattr(fitz, "TEXT_ALIGN_RIGHT", 2) if align == "right" else getattr(fitz, "TEXT_ALIGN_LEFT", 0)
+
+    # Узун тексттер үчүн шрифт акырындык менен кичирейип, сап аралыгы тыгыз сакталат.
+    for try_size in range(int(size), 13, -1):
+        lines = _wrap_logical_lines(text, max_w, try_size, font_obj=font_obj)
+        shaped = "\n".join(_format_text(line) for line in lines)
+        try:
+            rc = page.insert_textbox(
+                box_rect,
+                shaped,
+                fontsize=try_size,
+                fontname=fontname,
+                color=(20 / 255, 20 / 255, 20 / 255),
+                align=align_code,
+                lineheight=1.18,
+                overlay=True,
+            )
+            if rc >= 0:
+                return True
+        except Exception:
+            continue
+
+    return False
+
+
 def put_text(page, field, value, size=18, align="right", top_align=False):
     try:
         for w in list(page.widgets() or []):
@@ -367,10 +421,16 @@ def put_text(page, field, value, size=18, align="right", top_align=False):
                 except Exception:
                     pass
                 if value:
-                    ok = _insert_vector_text(
-                        page, rect, value,
-                        size=size, align=align, top_align=top_align
-                    )
+                    # أثر الكفالة жана ملاحظات талаалары өзүнчө компакттуу абзац болуп чыгат.
+                    if field in ("Text6", "Text7"):
+                        ok = _insert_compact_paragraph(
+                            page, rect, value, size=19, align=align
+                        )
+                    else:
+                        ok = _insert_vector_text(
+                            page, rect, value,
+                            size=size, align=align, top_align=top_align
+                        )
                     if not ok:
                         png = _render_value(
                             value, rect.width, rect.height,
