@@ -2830,36 +2830,54 @@ function ensureDriveToken(forceRefresh=false){
             reject(new Error("GOOGLE_CLIENT_ID толтурулган эмес."));
             return;
         }
+        let settled=false;
+        const timer=setTimeout(function(){
+            if(!settled){
+                settled=true;
+                reject(new Error("Google Drive уруксаты кечигип кетти же терезе бөгөттөлдү."));
+            }
+        },25000);
+        function finishResolve(tok){
+            if(settled) return;
+            settled=true;
+            clearTimeout(timer);
+            resolve(tok);
+        }
+        function finishReject(err){
+            if(settled) return;
+            settled=true;
+            clearTimeout(timer);
+            reject(err);
+        }
         loadGoogleIdentityServices(function(){
             try{
+                const onSuccess=function(response){
+                    if(response?.access_token){
+                        driveAccessToken=response.access_token;
+                        finishResolve(driveAccessToken);
+                    }else{
+                        driveAccessToken=null;
+                        finishReject(new Error(response?.error_description||response?.error||"Google Drive уруксаты алынган жок."));
+                    }
+                };
+                const onError=function(err){
+                    driveAccessToken=null;
+                    finishReject(new Error(err?.message||err?.type||"Google Drive терезеси жабылды же бөгөттөлдү."));
+                };
                 if(!tokenClient){
                     tokenClient=google.accounts.oauth2.initTokenClient({
                         client_id:GOOGLE_CLIENT_ID,
                         scope:DRIVE_SCOPE,
                         include_granted_scopes:true,
-                        callback:function(response){
-                            if(response?.access_token){
-                                driveAccessToken=response.access_token;
-                                resolve(driveAccessToken);
-                            }else{
-                                driveAccessToken=null;
-                                reject(new Error(response?.error_description||response?.error||"Google Drive уруксаты алынган жок."));
-                            }
-                        }
+                        callback:onSuccess,
+                        error_callback:onError
                     });
                 }else{
-                    tokenClient.callback=function(response){
-                        if(response?.access_token){
-                            driveAccessToken=response.access_token;
-                            resolve(driveAccessToken);
-                        }else{
-                            driveAccessToken=null;
-                            reject(new Error(response?.error_description||response?.error||"Google Drive уруксаты алынган жок."));
-                        }
-                    };
+                    tokenClient.callback=onSuccess;
+                    tokenClient.error_callback=onError;
                 }
                 tokenClient.requestAccessToken({prompt:forceRefresh?"consent":""});
-            }catch(e){reject(e);}
+            }catch(e){finishReject(e);}
         });
     });
 }
@@ -4256,8 +4274,24 @@ async function generatePdfFromMergedPayload(payload){
         }
     }
 
-    const res = await fetch('/api/generate', { method: 'POST', body: fd });
-    const data = await res.json();
+    const controller = new AbortController();
+    const fetchTimer = setTimeout(() => controller.abort(), 60000);
+    let res;
+    try{
+        res = await fetch('/api/generate', { method: 'POST', body: fd, signal: controller.signal });
+    }catch(fetchErr){
+        if(fetchErr?.name === 'AbortError') throw new Error('Сервер 60 секундда жооп берген жок (тайм-аут).');
+        throw fetchErr;
+    }finally{
+        clearTimeout(fetchTimer);
+    }
+    const rawText = await res.text();
+    let data;
+    try{
+        data = JSON.parse(rawText);
+    }catch(_){
+        throw new Error(`Сервер катасы (${res.status}). Render Logs текшериңиз.`);
+    }
     if(!data.ok){
         throw new Error(data.error || 'PDF даярдоодо ката кетти');
     }
@@ -4277,9 +4311,8 @@ async function generatePdfFromMergedPayload(payload){
     let driveId = '';
     let driveUrl = '';
     const pdfDriveFolder = getSelectedPdfFolder();
-    if(pdfBlob && pdfDriveFolder?.id && (driveAccessToken || currentUser)){
+    if(pdfBlob && pdfDriveFolder?.id && driveAccessToken){
         try{
-            await ensureDriveToken(false);
             const pdfFileObj = new File([pdfBlob], fileNameFromUrl, { type: 'application/pdf' });
             const uploaded = await uploadVideoToDrive(pdfFileObj, outFn, null, payload.beneficiary || '', pdfDriveFolder, false);
             driveId = uploaded?.id || '';
@@ -5885,9 +5918,18 @@ form.onsubmit = async (e) => {
     const capturedBeneficiary = (form.querySelector('[name="beneficiary"]')?.value || '').trim();
 
     const formData = new FormData(form);
+    const controller = new AbortController();
+    const fetchTimer = setTimeout(() => controller.abort(), 60000);
     try {
-        const res = await fetch('/api/generate', { method: 'POST', body: formData });
-        const data = await res.json();
+        const res = await fetch('/api/generate', { method: 'POST', body: formData, signal: controller.signal });
+        clearTimeout(fetchTimer);
+        const rawText = await res.text();
+        let data;
+        try {
+            data = JSON.parse(rawText);
+        } catch (_) {
+            throw new Error(`Сервер катасы (${res.status})`);
+        }
         if (data.ok) {
             let driveUploadNote = '';
             // Даяр болгон PDFти 5-бөлүмгө (жаңы жылга) жана тандалган Google Drive папкасына сактоо
@@ -5904,10 +5946,9 @@ form.onsubmit = async (e) => {
                 let driveId = '';
                 let driveUrl = '';
                 const pdfDriveFolder = getSelectedPdfFolder();
-                if(pdfBlob && pdfDriveFolder?.id && (driveAccessToken || currentUser)){
+                if(pdfBlob && pdfDriveFolder?.id && driveAccessToken){
                     try{
                         statusDiv.innerHTML = `<div class="loading-message">☁️ Google Drive («${escapeHTML(pdfDriveFolder.name)}») папкасына жүктөлүүдө...</div>`;
-                        await ensureDriveToken(false);
                         const pdfFileObj = new File([pdfBlob], fileNameFromUrl, { type: 'application/pdf' });
                         const uploaded = await uploadVideoToDrive(pdfFileObj, fn, null, capturedBeneficiary, pdfDriveFolder, false);
                         driveId = uploaded?.id || '';
@@ -5950,7 +5991,11 @@ form.onsubmit = async (e) => {
             statusDiv.innerHTML = `<div class="error-message">✕ حدث خطأ: ${escapeHTML(data.error || 'Белгисиз ката')}</div>`;
         }
     } catch (err) {
-        statusDiv.innerHTML = `<div class="error-message">✕ Сервер менен байланышууда ката кетти.</div>`;
+        clearTimeout(fetchTimer);
+        const msg = err?.name === 'AbortError'
+            ? 'Сервер 60 секундда жооп берген жок (тайм-аут).'
+            : (err?.message || 'Сервер менен байланышууда ката кетти.');
+        statusDiv.innerHTML = `<div class="error-message">✕ ${escapeHTML(msg)}</div>`;
     } finally {
         btn.disabled = false;
         btn.innerText = 'إنشاء ملف PDF (PDF даярдоо)';
