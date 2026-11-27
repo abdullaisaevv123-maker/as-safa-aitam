@@ -352,8 +352,8 @@ def put_text(page, field, value, size=18, align="right", top_align=False):
 
 def put_automatic_fields(doc):
     try:
-        put_text(doc[0], "Dropdown2", COUNTRY_VALUE, size=18, align="right")
-        put_text(doc[0], YEAR_FIELD, YEAR_VALUE, size=18, align="right")
+        put_text(doc[0], "Dropdown2", COUNTRY_VALUE, size=26, align="right")
+        put_text(doc[0], YEAR_FIELD, YEAR_VALUE, size=26, align="right")
     except Exception:
         pass
 
@@ -529,7 +529,7 @@ def build(form, files):
     for k, (p, f) in TEXT.items():
         value = (form_dict.get(k) or "").strip()
         top_align = k in ("impact", "notes")
-        size = 18
+        size = 22 if k in ("impact", "notes") else 26
 
         if p < len(doc):
             put_text(doc[p], f, value, size=size, align="right", top_align=top_align)
